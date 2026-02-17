@@ -8,20 +8,20 @@ import android.telephony.TelephonyManager
 class CallReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != TelephonyManager.ACTION_PHONE_STATE_CHANGED) return
+
+        // Android sends PHONE_STATE — do NOT filter incorrectly
+        if (intent.action != "android.intent.action.PHONE_STATE") return
 
         val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
-        val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER) // may be null on newer Android
+        val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
 
         val serviceIntent = Intent(context, OverlayService::class.java).apply {
             putExtra(OverlayService.EXTRA_STATE, state)
             putExtra(OverlayService.EXTRA_NUMBER, incomingNumber)
         }
 
-        // Use foreground service start for Android O+
         context.startForegroundService(serviceIntent)
 
-        // Launch post-call screen when returning to IDLE after OFFHOOK.
         CallStateTracker.onState(state) { shouldShowPostCall ->
             if (shouldShowPostCall) {
                 val post = Intent(context, PostCallActivity::class.java).apply {
@@ -32,18 +32,13 @@ class CallReceiver : BroadcastReceiver() {
             }
         }
 
-        // Store latest number we saw (best-effort)
         if (!incomingNumber.isNullOrBlank()) {
             CallStateTracker.lastNumber = incomingNumber
         }
     }
 }
 
-/**
- * Tracks transitions so we can detect "call ended".
- * This is best-effort; Android call state delivery can vary by device/OS.
- */
-private object CallStateTracker {
+object CallStateTracker {
     private var lastState: String? = null
     private var wasOffhook = false
     var lastNumber: String? = null
