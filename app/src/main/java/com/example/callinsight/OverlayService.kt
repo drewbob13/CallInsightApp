@@ -41,17 +41,31 @@ class OverlayService : Service() {
         super.onCreate()
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         createChannelIfNeeded()
-        startForeground(NOTIF_ID, buildNotification("CallInsight running"))
+        startForeground(NOTIF_ID, buildNotification("Waiting for call state…"))
+        Debug.log("OverlayService created")
+        Debug.notify(this, "CallInsight SERVICE", "OverlayService created + foreground started")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val state = intent?.getStringExtra(EXTRA_STATE)
-        val number = intent?.getStringExtra(EXTRA_NUMBER)
+        try {
+            val state = intent?.getStringExtra(EXTRA_STATE)
+            val number = intent?.getStringExtra(EXTRA_NUMBER)
 
-        when (state) {
-            TelephonyManager.EXTRA_STATE_RINGING -> showOverlay(number)
-            TelephonyManager.EXTRA_STATE_OFFHOOK -> updateOverlay(number) // optional; keeps it up
-            TelephonyManager.EXTRA_STATE_IDLE -> hideOverlayAndStop()
+            Debug.log("Service start. state=$state number=$number")
+            updateForegroundText("state=$state number=${number ?: "(null)"}")
+
+            when (state) {
+                TelephonyManager.EXTRA_STATE_RINGING -> showOverlay(number)
+                TelephonyManager.EXTRA_STATE_OFFHOOK -> updateOverlay(number)
+                TelephonyManager.EXTRA_STATE_IDLE -> hideOverlayAndStop()
+                else -> {
+                    // still keep service alive briefly; we have debug notif anyway
+                }
+            }
+
+        } catch (t: Throwable) {
+            Debug.log("OverlayService crashed", t)
+            Debug.notify(this, "CallInsight SERVICE CRASH", t.toString())
         }
 
         return START_NOT_STICKY
@@ -59,13 +73,17 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         removeOverlay()
+        Debug.log("OverlayService destroyed")
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun showOverlay(number: String?) {
-        if (!Settings.canDrawOverlays(this)) return
+        if (!Settings.canDrawOverlays(this)) {
+            Debug.notify(this, "CallInsight OVERLAY BLOCKED", "Draw-over-other-apps permission is OFF")
+            return
+        }
 
         if (overlayView == null) {
             overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_layout, null, false)
@@ -90,7 +108,13 @@ class OverlayService : Service() {
                 y = 0
             }
 
-            wm?.addView(overlayView, params)
+            try {
+                wm?.addView(overlayView, params)
+                Debug.notify(this, "CallInsight OVERLAY", "Overlay view added")
+            } catch (t: Throwable) {
+                Debug.notify(this, "CallInsight OVERLAY ADD FAILED", t.toString())
+                throw t
+            }
         }
 
         updateOverlay(number)
@@ -127,7 +151,6 @@ class OverlayService : Service() {
     }
 
     private fun loadLast3CallsAndSmsForNumber(number: String?): List<String> {
-        // If we don't have a number, just show last 3 call log entries as a fallback.
         val out = mutableListOf<String>()
 
         val hasCallLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
@@ -137,12 +160,8 @@ class OverlayService : Service() {
             return listOf("Missing permissions: READ_CALL_LOG / READ_SMS")
         }
 
-        if (hasCallLog) {
-            out += queryCalls(number, limit = 3)
-        }
-        if (hasSms && out.size < 3) {
-            out += querySms(number, limit = 3 - out.size)
-        }
+        if (hasCallLog) out += queryCalls(number, limit = 3)
+        if (hasSms && out.size < 3) out += querySms(number, limit = 3 - out.size)
 
         return out.take(3)
     }
@@ -198,7 +217,6 @@ class OverlayService : Service() {
     private fun querySms(number: String?, limit: Int): List<String> {
         val results = mutableListOf<String>()
 
-        // SMS “address” is the phone number.
         val uri: Uri = Telephony.Sms.CONTENT_URI
         val projection = arrayOf(
             Telephony.Sms.ADDRESS,
@@ -249,7 +267,13 @@ class OverlayService : Service() {
             .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle("CallInsightApp")
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .build()
+    }
+
+    private fun updateForegroundText(text: String) {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ID, buildNotification(text))
     }
 }
