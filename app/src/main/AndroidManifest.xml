@@ -26,14 +26,13 @@
         <service
             android:name=".OverlayService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="phoneCall" />
 
         <receiver
             android:name=".CallReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.PHONE_STATE" />
-                <action android:name="android.telephony.action.PHONE_STATE_CHANGED" />
+                <action android:name="android.intent.action.PHONE_STATE"/>
             </intent-filter>
         </receiver>
 
